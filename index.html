@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Catch the Coins!</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background-color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 { margin-top: 10px; }
+
+    #container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    canvas {
+      background: #fff;
+      border: 2px solid #ccc;
+      touch-action: none;
+    }
+
+    .btn-group {
+      margin-top: 10px;
+    }
+
+    .control-btn {
+      font-size: 20px;
+      padding: 10px 20px;
+      margin: 0 5px;
+    }
+
+    #quitBtn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: red;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      font-size: 16px;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+    }
+
+    #modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    #modalContent {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    #modalContent button {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    #sadMessage {
+      font-size: 18px;
+      color: darkred;
+      margin-top: 10px;
+      display: none;
+    }
+
+    footer {
+      margin: 20px 0;
+      font-size: 14px;
+      color: gray;
+    }
+
+    #goodbye {
+      font-size: 24px;
+      color: red;
+      margin-top: 20px;
+      display: none;
+    }
+
+    #instructions {
+      font-size: 16px;
+      margin-top: 5px;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h1>Catch the Coins!</h1>
+    <p id="instructions">Move the girl using buttons or drag. Press ❌ to quit.</p>
+    <canvas id="gameCanvas" width="600" height="800"></canvas>
+    <div class="btn-group" id="buttonControls">
+      <button class="control-btn" onclick="moveLeft()">⬅️</button>
+      <button class="control-btn" onclick="moveRight()">➡️</button>
+    </div>
+  </div>
+
+  <button id="quitBtn" onclick="openQuitModal()">❌</button>
+
+  <div id="modal">
+    <div id="modalContent">
+      <p id="quitText">Do you want to quit or restart?</p>
+      <p id="sadMessage">Sad to see you go 😢</p>
+      <button onclick="restartGame()">Restart</button>
+    </div>
+  </div>
+
+  <div id="goodbye">Game exited. Thanks for playing!</div>
+  <footer>Created by Maaz</footer>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+
+    const playerImg = new Image();
+    const fanImg = new Image();
+    const fireImg = new Image();
+    const offerImg = new Image();
+
+    playerImg.src = "girl_1.png";
+    fanImg.src = "coins.png";
+    fireImg.src = "sephora.png";
+    offerImg.src = "special_offer.png";
+
+    const player = { width: 80, height: 100, x: WIDTH / 2 - 40, y: HEIGHT - 110, speed: 8 };
+    let objects = [];
+    let score = 0;
+    let lives = 3;
+    let gaveLifeAt80 = false;
+    let tookLifeBelowMinus10 = false;
+    let frameCount = 0;
+    let gameRunning = true;
+    let winnerShown = false;
+
+    const keys = {};
+
+    document.addEventListener("keydown", (e) => {
+      keys[e.code] = true;
+      if (["ArrowLeft", "ArrowRight", "KeyQ"].includes(e.code)) e.preventDefault();
+      if (e.code === "KeyQ") openQuitModal();
+    });
+
+    document.addEventListener("keyup", (e) => keys[e.code] = false);
+
+    // Touch drag on X-axis
+    let isDragging = false;
+    canvas.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const x = t.clientX - rect.left;
+      const y = t.clientY - rect.top;
+      if (x >= player.x && x <= player.x + player.width &&
+          y >= player.y && y <= player.y + player.height) {
+        isDragging = true;
+      }
+    });
+
+    canvas.addEventListener("touchmove", (e) => {
+      if (!isDragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.touches[0].clientX - rect.left;
+      player.x = Math.min(WIDTH - player.width, Math.max(0, x - player.width / 2));
+    });
+
+    canvas.addEventListener("touchend", () => {
+      isDragging = false;
+    });
+
+    function spawnObject() {
+      const rand = Math.random();
+      const type = rand < 0.45 ? "fan" : rand < 0.9 ? "fire" : "offer";
+      const x = Math.random() * (WIDTH - 50);
+      objects.push({ type, x, y: 0, width: 50, height: 50, speed: 5 });
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+    }
+
+    function update() {
+      if (!gameRunning || lives <= 0) return;
+      if (keys["ArrowLeft"]) moveLeft();
+      if (keys["ArrowRight"]) moveRight();
+
+      frameCount++;
+      if (frameCount >= 30) { spawnObject(); frameCount = 0; }
+
+      objects = objects.filter(obj => {
+        obj.y += obj.speed;
+        const playerRect = { x: player.x, y: player.y, width: player.width, height: player.height };
+        const objRect = { x: obj.x, y: obj.y, width: obj.width, height: obj.height };
+
+        if (rectsOverlap(playerRect, objRect)) {
+          if (obj.type === "fan") score++;
+          else if (obj.type === "fire") score--;
+          else if (obj.type === "offer") score += 5;
+          return false;
+        }
+        return obj.y < HEIGHT;
+      });
+
+      if (score >= 80 && !gaveLifeAt80) { lives++; gaveLifeAt80 = true; }
+      if (score <= -10 && !tookLifeBelowMinus10) { lives--; tookLifeBelowMinus10 = true; }
+      if (lives <= 0) setTimeout(openQuitModal, 500);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      ctx.drawImage(playerImg, player.x, player.y, player.width, player.height);
+      for (let obj of objects) {
+        const img = obj.type === "fan" ? fanImg : obj.type === "fire" ? fireImg : offerImg;
+        ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
+      }
+      ctx.fillStyle = "black";
+      ctx.font = "20px Arial";
+      ctx.fillText("Score: " + score, 10, 30);
+      ctx.fillText("Lives: " + lives, WIDTH - 100, 30);
+      if (score >= 10 && !winnerShown) {
+        ctx.fillStyle = "green";
+        ctx.font = "bold 28px Arial";
+        ctx.fillText("🏆 YOU ARE A WINNER! 🏆", WIDTH / 2 - 160, HEIGHT / 2);
+        winnerShown = true;
+      }
+    }
+
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function moveLeft() {
+      player.x = Math.max(0, player.x - player.speed);
+    }
+
+    function moveRight() {
+      player.x = Math.min(WIDTH - player.width, player.x + player.speed);
+    }
+
+    function restartGame() {
+      player.x = WIDTH / 2 - 40;
+      score = 0;
+      lives = 3;
+      gaveLifeAt80 = false;
+      tookLifeBelowMinus10 = false;
+      winnerShown = false;
+      frameCount = 0;
+      objects = [];
+      gameRunning = true;
+      document.getElementById("modal").style.display = "none";
+      document.getElementById("buttonControls").style.display = "flex";
+      document.getElementById("sadMessage").style.display = "none";
+      document.getElementById("quitText").style.display = "block";
+    }
+
+    function openQuitModal() {
+      gameRunning = false;
+      document.getElementById("modal").style.display = "flex";
+      document.getElementById("buttonControls").style.display = "none";
+      document.getElementById("sadMessage").style.display = "block";
+      document.getElementById("quitText").style.display = "none";
+    }
+
+    let loaded = 0;
+    [playerImg, fanImg, fireImg, offerImg].forEach(img => {
+      img.onload = () => {
+        loaded++;
+        if (loaded === 4) gameLoop();
+      };
+    });
+  </script>
+</body>
+</html>
